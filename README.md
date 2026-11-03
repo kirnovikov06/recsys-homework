@@ -2,7 +2,7 @@
 
 Новиков Кирилл Сергеевич, Б05-307.
 
-[Домашнее задание 1](hw1/experiments.ipynb) — сравнение пяти моделей на Amazon Video Games.
+[Домашнее задание 1](hw1/experiments.ipynb) - сравнение пяти моделей на Amazon Video Games.
 
 Для запуска нужен Python 3.12:
 

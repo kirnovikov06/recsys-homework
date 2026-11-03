@@ -17,13 +17,13 @@ class FM(nn.Module):
         f = torch.cat((u[:, None] + 1, self.f[i]), dim=1)
         v = self.v(f)
         s = v.sum(dim=1)
-        return self.b + self.w(f).sum(dim=(1, 2)) + 0.5 * (s.square() - v.square().sum(dim=1)).sum(dim=1)
+        z = 0.5 * (s.square() - v.square().sum(dim=1)).sum(dim=1)
+        return self.b + self.w(f).sum(dim=(1, 2)) + z
 
     def fit(self, a, cats):
         torch.manual_seed(self.seed)
         rng = np.random.default_rng(self.seed)
         n, m = a.shape
-        self.n = n
         c = cats if self.meta else [[] for _ in range(m)]
         d = max((max(x, default=-1) for x in c), default=-1) + 1
         f = np.zeros((m, 1 + max(map(len, c), default=0)), dtype=np.int64)
@@ -40,28 +40,24 @@ class FM(nn.Module):
             self.v.weight[0].zero_()
         opt = torch.optim.Adam(self.parameters(), lr=self.lr, weight_decay=self.reg)
         b = a.tocoo()
-        seen = set((b.row.astype(np.int64) * m + b.col).tolist())
+        seen = [set(a[u].indices) for u in range(n)]
         pu = b.row[b.data >= 4]
-        self.losses = []
         for _ in range(self.epochs):
             ni = rng.integers(m, size=len(pu))
-            bad = np.fromiter((int(u) * m + int(i) in seen for u, i in zip(pu, ni)), dtype=bool)
+            bad = np.array([i in seen[u] for u, i in zip(pu, ni)])
             while bad.any():
                 ni[bad] = rng.integers(m, size=bad.sum())
-                bad = np.fromiter((int(u) * m + int(i) in seen for u, i in zip(pu, ni)), dtype=bool)
-            u = torch.tensor(np.r_[b.row, pu], dtype=torch.long)
-            i = torch.tensor(np.r_[b.col, ni], dtype=torch.long)
-            t = torch.tensor(np.r_[b.data >= 4, np.zeros(len(pu))], dtype=torch.float32)
+                bad = np.array([i in seen[u] for u, i in zip(pu, ni)])
+            u = torch.tensor(np.concatenate([b.row, pu]), dtype=torch.long)
+            i = torch.tensor(np.concatenate([b.col, ni]), dtype=torch.long)
+            t = torch.tensor(np.concatenate([b.data >= 4, np.zeros(len(pu))]), dtype=torch.float32)
             order = rng.permutation(len(t))
-            total = 0
             for start in range(0, len(t), 4096):
                 j = order[start:start + 4096]
                 opt.zero_grad()
                 loss = nn.functional.binary_cross_entropy_with_logits(self(u[j], i[j]), t[j])
                 loss.backward()
                 opt.step()
-                total += loss.item() * len(j)
-            self.losses.append(total / len(t))
         with torch.no_grad():
             v = self.v(self.f)
             self.iv = v.sum(dim=1)

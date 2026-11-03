@@ -9,7 +9,7 @@ class EASE:
     def fit(self, a):
         self.a = a.tocsr().astype(np.float64)
         g = (self.a.T @ self.a).toarray()
-        g.flat[::g.shape[0] + 1] += self.reg
+        g += self.reg * np.eye(g.shape[0])
         p = cho_solve(cho_factor(g), np.eye(g.shape[0]))
         self.w = -p / np.diag(p)[None, :]
         np.fill_diagonal(self.w, 0)

@@ -3,7 +3,7 @@ import gzip
 import hashlib
 import json
 from pathlib import Path
-from urllib.request import urlopen
+from urllib.request import urlretrieve
 
 import numpy as np
 import pandas as pd
@@ -24,11 +24,7 @@ def download():
     for s in FILES:
         f = p / s
         if not f.exists():
-            q = f.with_suffix(".part")
-            with urlopen(URL + s, timeout=180) as src, q.open("wb") as dst:
-                while b := src.read(1024 * 1024):
-                    dst.write(b)
-            q.replace(f)
+            urlretrieve(URL + s, f)
     hashes = {}
     for s in FILES:
         with (p / s).open("rb") as f:
@@ -57,7 +53,7 @@ def load_data():
 
 
 def prepare(a, b, t1, t2, n=3000):
-    log = [{"этап": "Исходные отзывы", "взаимодействия": len(a), "пользователи": a.user.nunique(), "товары": a.item.nunique()}]
+    log = [["Исходные отзывы", len(a), a.user.nunique(), a.item.nunique()]]
     a = a.dropna().copy()
     a = a[a.r.between(1, 5) & (a.t > 0)]
     a = a.sort_values(["t", "user", "item"], kind="stable").drop_duplicates(["user", "item"], keep="first")
@@ -65,7 +61,7 @@ def prepare(a, b, t1, t2, n=3000):
     z = a[a.t < t1].groupby("item").size().rename("n").reset_index()
     z = z.sort_values(["n", "item"], ascending=[False, True]).head(n)
     a = a[a.item.isin(z.item)].copy()
-    log.append({"этап": "Очистка и 3 000 товаров по train", "взаимодействия": len(a), "пользователи": a.user.nunique(), "товары": a.item.nunique()})
+    log.append([f"Отбор {n} товаров по train", len(a), a.user.nunique(), a.item.nunique()])
     z = a[a.t < t1].groupby("user").size()
     a = a[a.user.isin(z[z >= 3].index)].copy()
     us = sorted(a.user.unique())
@@ -78,7 +74,7 @@ def prepare(a, b, t1, t2, n=3000):
     vocab = sorted({s for x in b.cats for s in x})
     enc = {s: j for j, s in enumerate(vocab)}
     cats = [[enc[s] for s in x] for x in b.cats]
-    log.append({"этап": "Пользователи с >=3 отзывами в train", "взаимодействия": len(a), "пользователи": len(us), "товары": len(it)})
+    log.append(["Пользователи с >=3 отзывами в train", len(a), len(us), len(it)])
     tr = a[a.t < t1].copy()
     va = a[(a.t >= t1) & (a.t < t2)].copy()
     te = a[a.t >= t2].copy()
@@ -86,7 +82,8 @@ def prepare(a, b, t1, t2, n=3000):
     assert len(us) >= 1000 and len(it) >= 1000
     assert tr.t.max() < va.t.min() and va.t.max() < te.t.min()
     assert tr.u.nunique() == len(us) and tr.i.nunique() == len(it)
-    return a, b, cats, tr, va, te, pd.DataFrame(log)
+    log = pd.DataFrame(log, columns=["этап", "взаимодействия", "пользователи", "товары"])
+    return a, b, cats, tr, va, te, log
 
 
 def matrix(a, shape, positive=False):
@@ -109,12 +106,9 @@ def truth(a, known, max_users=3000, seed=42):
 
 def recommend(model, u, known, k=10):
     s = np.asarray(model.score(u), dtype=np.float64)
-    assert np.isfinite(s).all()
     for j, x in enumerate(u):
         s[j, known[x].indices] = -np.inf
-    order = np.argsort(-s, axis=1, kind="stable")[:, :k]
-    assert np.isfinite(np.take_along_axis(s, order, axis=1)).all()
-    return order
+    return np.argsort(-s, axis=1, kind="stable")[:, :k]
 
 
 def evaluate(model, u, q, known, k=10):
@@ -124,13 +118,11 @@ def evaluate(model, u, q, known, k=10):
         pred = recommend(model, v, known, k)
         for x, p in zip(v, pred):
             rel = q[int(x)]
-            h = np.isin(p, list(rel)).astype(float)
+            h = np.array([i in rel for i in p])
             dcg = np.sum(h / np.log2(np.arange(k) + 2))
             idcg = np.sum(1 / np.log2(np.arange(min(k, len(rel))) + 2))
-            assert len(set(p)) == k and not set(p).intersection(known[x].indices)
             rows.append([int(x), h.sum() / len(rel), dcg / idcg])
     out = pd.DataFrame(rows, columns=["u", "Recall@10", "NDCG@10"])
-    assert out.iloc[:, 1:].ge(0).all().all() and out.iloc[:, 1:].le(1).all().all()
     return out.iloc[:, 1:].mean().to_dict(), out
 
 

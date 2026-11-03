@@ -1,0 +1,14 @@
+.venv/
+venv/
+__pycache__/
+.ipynb_checkpoints/
+.DS_Store
+data/
+*.gz
+*.zip
+*.npy
+*.npz
+*.pkl
+*.pt
+*.html
+hw1/figures/
